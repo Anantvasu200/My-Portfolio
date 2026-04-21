@@ -4,13 +4,13 @@ pipeline {
     environment {
         IMAGE_NAME = 'my-portfolio'
         IMAGE_TAG  = 'latest'
+        DEVELOPER_EMAIL = 'ananttatapower@gmail.com'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo '📥 Code clone ho raha hai...'
                 checkout scm
             }
         }
@@ -24,9 +24,8 @@ pipeline {
                 }
             }
             steps {
-                sh 'npm ci --prefer-offline || npm install'
+                sh 'npm install'
                 sh 'npm run build'
-                sh 'ls -la dist/'
             }
         }
 
@@ -39,28 +38,35 @@ pipeline {
                 }
             }
             steps {
-                sh 'npm audit --audit-level=high || true'
+                sh 'npm audit --audit-level=high > npm-audit-report.txt 2>&1 || true'
             }
         }
 
         stage('Docker Image Build') {
-    steps {
-        sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
-        sh "docker images | grep ${IMAGE_NAME}"
-    }
-}
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+            }
+        }
 
         stage('Container Scan — Trivy') {
-    steps {
-        echo '🔒 Trivy se image scan ho rahi hai...'
-        sh '''
-            trivy image \
-              --severity HIGH,CRITICAL \
-              --exit-code 0 \
-              my-portfolio:latest
-        '''
-    }
-}
+            steps {
+                sh """
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --format template \
+                      --template "@/usr/local/share/trivy/templates/html.tpl" \
+                      --output trivy-report.html \
+                      ${IMAGE_NAME}:${IMAGE_TAG} || true
+
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --output trivy-report.txt \
+                      ${IMAGE_NAME}:${IMAGE_TAG} || true
+                """
+            }
+        }
 
         stage('Deploy') {
             steps {
@@ -70,24 +76,186 @@ pipeline {
                     docker run -d \
                       --name portfolio-live \
                       -p 80:80 \
-                      ${IMAGE_NAME}:${IMAGE_TAG}
+                      my-portfolio:latest
                 '''
-                echo '✅ Portfolio live on port 80!'
             }
         }
     }
 
     post {
         always {
-            echo '🧹 Cleaning workspace...'
+            // HTML Report Jenkins mein publish karo
+            publishHTML([
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: '.',
+                reportFiles: 'trivy-report.html',
+                reportName: 'Trivy Security Report'
+            ])
+
+            // Artifacts save karo
+            archiveArtifacts artifacts: 'trivy-report.txt, npm-audit-report.txt',
+                            allowEmptyArchive: true
+
             sh 'docker system prune -f || true'
             cleanWs()
         }
+
         success {
-            echo '🎉 DevSecOps Pipeline Complete!'
+            script {
+                // npm audit report read karo email ke liye
+                def npmReport = ''
+                try {
+                    npmReport = readFile('npm-audit-report.txt')
+                } catch(e) {
+                    npmReport = 'Report not available'
+                }
+
+                emailext(
+                    to: "${DEVELOPER_EMAIL}",
+                    subject: "✅ Build #${BUILD_NUMBER} SUCCESS — Portfolio DevSecOps",
+                    mimeType: 'text/html',
+                    attachmentsPattern: 'trivy-report.html, npm-audit-report.txt',
+                    body: """
+                        <html>
+                        <body style='font-family: Arial, sans-serif;'>
+
+                        <h2 style='color:#2ecc71'>
+                            ✅ Pipeline Successful — Build #${BUILD_NUMBER}
+                        </h2>
+
+                        <table border='1' cellpadding='10' cellspacing='0'
+                               style='border-collapse:collapse; width:100%'>
+                            <tr style='background:#f2f2f2'>
+                                <td><b>Job Name</b></td>
+                                <td>${JOB_NAME}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Build Number</b></td>
+                                <td>#${BUILD_NUMBER}</td>
+                            </tr>
+                            <tr style='background:#f2f2f2'>
+                                <td><b>Status</b></td>
+                                <td style='color:green'><b>SUCCESS ✅</b></td>
+                            </tr>
+                            <tr>
+                                <td><b>Duration</b></td>
+                                <td>${currentBuild.durationString}</td>
+                            </tr>
+                            <tr style='background:#f2f2f2'>
+                                <td><b>Build URL</b></td>
+                                <td>
+                                    <a href='${BUILD_URL}'>${BUILD_URL}</a>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <br>
+                        <h3>📊 Pipeline Stages:</h3>
+                        <table border='1' cellpadding='8' cellspacing='0'
+                               style='border-collapse:collapse'>
+                            <tr style='background:#f2f2f2'>
+                                <th>Stage</th><th>Status</th>
+                            </tr>
+                            <tr>
+                                <td>Checkout</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                            <tr style='background:#f2f2f2'>
+                                <td>Install & Build</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                            <tr>
+                                <td>SCA — npm audit</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                            <tr style='background:#f2f2f2'>
+                                <td>Docker Image Build</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                            <tr>
+                                <td>Container Scan — Trivy</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                            <tr style='background:#f2f2f2'>
+                                <td>Deploy</td>
+                                <td style='color:green'>✅ Pass</td>
+                            </tr>
+                        </table>
+
+                        <br>
+                        <h3>🔒 Trivy Security Scan:</h3>
+                        <p>
+                            Detailed HTML report is attached:
+                            <b>trivy-report.html</b>
+                        </p>
+
+                        <br>
+                        <h3>📦 npm audit Report:</h3>
+                        <pre style='background:#f4f4f4; padding:10px;
+                                    border-radius:5px; font-size:12px'>
+${npmReport}
+                        </pre>
+
+                        <br>
+                        <p style='color:#888; font-size:12px'>
+                            This is an automated message from Jenkins CI/CD Pipeline.
+                        </p>
+
+                        </body>
+                        </html>
+                    """
+                )
+            }
         }
+
         failure {
-            echo '❌ Pipeline fail — check logs!'
+            emailext(
+                to: "${DEVELOPER_EMAIL}",
+                subject: "❌ Build #${BUILD_NUMBER} FAILED — Portfolio DevSecOps",
+                mimeType: 'text/html',
+                body: """
+                    <html>
+                    <body style='font-family: Arial, sans-serif;'>
+
+                    <h2 style='color:#e74c3c'>
+                        ❌ Pipeline Failed — Build #${BUILD_NUMBER}
+                    </h2>
+
+                    <table border='1' cellpadding='10' cellspacing='0'
+                           style='border-collapse:collapse; width:100%'>
+                        <tr style='background:#f2f2f2'>
+                            <td><b>Job Name</b></td>
+                            <td>${JOB_NAME}</td>
+                        </tr>
+                        <tr>
+                            <td><b>Build Number</b></td>
+                            <td>#${BUILD_NUMBER}</td>
+                        </tr>
+                        <tr style='background:#f2f2f2'>
+                            <td><b>Status</b></td>
+                            <td style='color:red'><b>FAILED ❌</b></td>
+                        </tr>
+                        <tr>
+                            <td><b>Console Log</b></td>
+                            <td>
+                                <a href='${BUILD_URL}console'>
+                                    Click here to view logs
+                                </a>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <br>
+                    <p style='color:#888; font-size:12px'>
+                        This is an automated message from Jenkins CI/CD Pipeline.
+                    </p>
+
+                    </body>
+                    </html>
+                """
+            )
         }
     }
 }
