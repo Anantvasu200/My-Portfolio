@@ -44,24 +44,23 @@ pipeline {
         }
 
         stage('Docker Image Build') {
-            steps {
-                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .'
-                sh 'docker images | grep ${IMAGE_NAME}'
-            }
-        }
+    steps {
+        sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+        sh "docker images | grep ${IMAGE_NAME}"
+    }
+}
 
         stage('Container Scan — Trivy') {
-            steps {
-                sh '''
-                    docker run --rm \
-                      -v /var/run/docker.sock:/var/run/docker.sock \
-                      aquasec/trivy:latest image \
-                      --severity HIGH,CRITICAL \
-                      --exit-code 0 \
-                      my-portfolio:latest
-                '''
-            }
-        }
+    steps {
+        echo '🔒 Trivy se image scan ho rahi hai...'
+        sh '''
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --exit-code 0 \
+              my-portfolio:latest
+        '''
+    }
+}
 
         stage('Deploy') {
             steps {
