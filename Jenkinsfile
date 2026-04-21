@@ -83,8 +83,9 @@ pipeline {
     }
 
     post {
+
         always {
-            // HTML Report Jenkins mein publish karo
+            // Publish Trivy HTML report in Jenkins UI
             publishHTML([
                 allowMissing: true,
                 alwaysLinkToLastBuild: true,
@@ -94,21 +95,21 @@ pipeline {
                 reportName: 'Trivy Security Report'
             ])
 
-            // Artifacts save karo
+            // Archive reports
             archiveArtifacts artifacts: 'trivy-report.txt, npm-audit-report.txt',
                             allowEmptyArchive: true
 
+            // Cleanup docker (safe)
             sh 'docker system prune -f || true'
-            cleanWs()
         }
 
         success {
             script {
-                // npm audit report read karo email ke liye
                 def npmReport = ''
-                try {
+
+                if (fileExists('npm-audit-report.txt')) {
                     npmReport = readFile('npm-audit-report.txt')
-                } catch(e) {
+                } else {
                     npmReport = 'Report not available'
                 }
 
@@ -152,44 +153,8 @@ pipeline {
                         </table>
 
                         <br>
-                        <h3>📊 Pipeline Stages:</h3>
-                        <table border='1' cellpadding='8' cellspacing='0'
-                               style='border-collapse:collapse'>
-                            <tr style='background:#f2f2f2'>
-                                <th>Stage</th><th>Status</th>
-                            </tr>
-                            <tr>
-                                <td>Checkout</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                            <tr style='background:#f2f2f2'>
-                                <td>Install & Build</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                            <tr>
-                                <td>SCA — npm audit</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                            <tr style='background:#f2f2f2'>
-                                <td>Docker Image Build</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                            <tr>
-                                <td>Container Scan — Trivy</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                            <tr style='background:#f2f2f2'>
-                                <td>Deploy</td>
-                                <td style='color:green'>✅ Pass</td>
-                            </tr>
-                        </table>
-
-                        <br>
-                        <h3>🔒 Trivy Security Scan:</h3>
-                        <p>
-                            Detailed HTML report is attached:
-                            <b>trivy-report.html</b>
-                        </p>
+                        <h3>🔒 Trivy Security Report:</h3>
+                        <p>Attached: <b>trivy-report.html</b></p>
 
                         <br>
                         <h3>📦 npm audit Report:</h3>
@@ -223,39 +188,20 @@ ${npmReport}
                         ❌ Pipeline Failed — Build #${BUILD_NUMBER}
                     </h2>
 
-                    <table border='1' cellpadding='10' cellspacing='0'
-                           style='border-collapse:collapse; width:100%'>
-                        <tr style='background:#f2f2f2'>
-                            <td><b>Job Name</b></td>
-                            <td>${JOB_NAME}</td>
-                        </tr>
-                        <tr>
-                            <td><b>Build Number</b></td>
-                            <td>#${BUILD_NUMBER}</td>
-                        </tr>
-                        <tr style='background:#f2f2f2'>
-                            <td><b>Status</b></td>
-                            <td style='color:red'><b>FAILED ❌</b></td>
-                        </tr>
-                        <tr>
-                            <td><b>Console Log</b></td>
-                            <td>
-                                <a href='${BUILD_URL}console'>
-                                    Click here to view logs
-                                </a>
-                            </td>
-                        </tr>
-                    </table>
-
-                    <br>
-                    <p style='color:#888; font-size:12px'>
-                        This is an automated message from Jenkins CI/CD Pipeline.
+                    <p>
+                        Check logs here:
+                        <a href='${BUILD_URL}console'>View Console Output</a>
                     </p>
 
                     </body>
                     </html>
                 """
             )
+        }
+
+        cleanup {
+            // FINAL cleanup (after everything)
+            cleanWs()
         }
     }
 }
